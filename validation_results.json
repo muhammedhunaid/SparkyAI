@@ -1,0 +1,165 @@
+{
+  "documentation": {
+    "status": "pass",
+    "tests": [
+      {
+        "name": "API_DOCUMENTATION.md exists and has content",
+        "status": "pass",
+        "detail": "Size: 12326 bytes"
+      },
+      {
+        "name": "DEVELOPMENT_GUIDE.md exists and has content",
+        "status": "pass",
+        "detail": "Size: 15299 bytes"
+      },
+      {
+        "name": "DEPLOYMENT_GUIDE.md exists and has content",
+        "status": "pass",
+        "detail": "Size: 18360 bytes"
+      },
+      {
+        "name": "API doc contains Agent System Architecture",
+        "status": "pass"
+      },
+      {
+        "name": "API doc contains RAG System Components",
+        "status": "pass"
+      },
+      {
+        "name": "API doc contains Agent Tools",
+        "status": "pass"
+      },
+      {
+        "name": "API doc contains Web Scraping Engine",
+        "status": "pass"
+      }
+    ]
+  },
+  "migration": {
+    "status": "pass",
+    "tests": [
+      {
+        "name": "web_scrape.py has scrape_sundevil_central",
+        "status": "pass"
+      },
+      {
+        "name": "web_scrape.py has _scrape_central_organizations",
+        "status": "pass"
+      },
+      {
+        "name": "web_scrape.py has _scrape_central_events",
+        "status": "pass"
+      },
+      {
+        "name": "web_scrape.py has sundevilcentral.asu.edu",
+        "status": "pass"
+      },
+      {
+        "name": "student_clubs_events_tools.py has _get_base_url",
+        "status": "pass"
+      },
+      {
+        "name": "student_clubs_events_tools.py has _build_central_event_params",
+        "status": "pass"
+      },
+      {
+        "name": "student_clubs_events_tools.py has _build_legacy_event_params",
+        "status": "pass"
+      },
+      {
+        "name": "student_clubs_events_tools.py has sundevilcentral",
+        "status": "pass"
+      }
+    ]
+  },
+  "pipeline": {
+    "status": "pass",
+    "tests": [
+      {
+        "name": "data_processor.py has enable_caching",
+        "status": "pass"
+      },
+      {
+        "name": "data_processor.py has process_documents_batch_async",
+        "status": "pass"
+      },
+      {
+        "name": "data_processor.py has _semantic_chunking",
+        "status": "pass"
+      },
+      {
+        "name": "data_processor.py has _paragraph_chunking",
+        "status": "pass"
+      },
+      {
+        "name": "data_processor.py has _clean_text_enhanced",
+        "status": "pass"
+      },
+      {
+        "name": "data_processor.py has performance_metrics",
+        "status": "pass"
+      },
+      {
+        "name": "data_processor.py has cache_ttl",
+        "status": "pass"
+      },
+      {
+        "name": "raptor.py has enable_caching",
+        "status": "pass"
+      },
+      {
+        "name": "raptor.py has performance_metrics",
+        "status": "pass"
+      },
+      {
+        "name": "raptor.py has queue_raptor_tree_priority",
+        "status": "pass"
+      },
+      {
+        "name": "raptor.py has _process_priority_queue",
+        "status": "pass"
+      },
+      {
+        "name": "raptor.py has _calculate_similarity",
+        "status": "pass"
+      },
+      {
+        "name": "raptor.py has cache_ttl",
+        "status": "pass"
+      }
+    ]
+  },
+  "files": {
+    "status": "pass",
+    "tests": [
+      {
+        "name": "main.py exists and appears valid",
+        "status": "pass"
+      },
+      {
+        "name": "discord_bot.py exists and appears valid",
+        "status": "pass"
+      },
+      {
+        "name": "requirements.txt exists",
+        "status": "pass"
+      },
+      {
+        "name": "rag/web_scrape.py exists and appears valid",
+        "status": "pass"
+      },
+      {
+        "name": "rag/data_processor.py exists and appears valid",
+        "status": "pass"
+      },
+      {
+        "name": "rag/raptor.py exists and appears valid",
+        "status": "pass"
+      },
+      {
+        "name": "agent_tools/student_clubs_events_tools.py exists and appears valid",
+        "status": "pass"
+      }
+    ]
+  }
+}

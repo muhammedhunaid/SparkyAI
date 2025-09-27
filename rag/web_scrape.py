@@ -131,49 +131,62 @@ class ASUWebScraper:
                 except Exception as e:
                     self.logger.error(f"@web_scrape.py Error extracting search results: {e}")
             
-            if 'asu.campuslabs.com/engage' in search_url:
-                self.logger.info(f"@web_scrape.py Searching for ASU Campus Labs links {search_url}")
-                self.driver.get(search_url)
-                if 'events' in search_url:
-                    # Wait for events to load
-                    events = wait.until(EC.presence_of_all_elements_located(
-                        (By.CSS_SELECTOR, 'a[href*="/engage/event/"]')
-                    ))
-                    search_results = [
-                        event.get_attribute('href') 
-                        for event in events[:3]
-                    ]
-                    self.logger.info(f"@web_scrape.py Found {len(search_results)} ASU Campus Labs results")
+            # Handle both SunDevilSync (Legacy) and SunDevilCentral (New)
+            if 'asu.campuslabs.com/engage' in search_url or 'central.asu.edu' in search_url:
+                if 'central.asu.edu' in search_url:
+                    # SunDevilCentral - New platform
+                    self.logger.info(" @web_scrape.py Detected SunDevilCentral URL")
+                    results = await self.scrape_sundevil_central(url=search_url, query=optional_query)
+                    for result in results:
+                        self.text_content.append({
+                            'content': result['content'],
+                            'metadata': result['metadata']
+                        })
+                    return self.text_content
+                else:
+                    # SunDevilSync - Legacy platform (existing logic)
+                    self.logger.info(f"@web_scrape.py Searching for ASU Campus Labs links {search_url}")
+                    self.driver.get(search_url)
+                    if 'events' in search_url:
+                        # Wait for events to load
+                        events = wait.until(EC.presence_of_all_elements_located(
+                            (By.CSS_SELECTOR, 'a[href*="/engage/event/"]')
+                        ))
+                        search_results = [
+                            event.get_attribute('href') 
+                            for event in events[:3]
+                        ]
+                        self.logger.info(f"@web_scrape.py Found {len(search_results)} ASU Campus Labs results")
+                        
+                        
+                    elif 'organizations' in search_url:
+                        # Wait for organizations to load
+                        self.logger.info(f"@web_scrape.py Searching for ASU Campus Labs organizations links {search_url}")
+                        orgs = wait.until(EC.presence_of_all_elements_located(
+                            (By.CSS_SELECTOR, 'a[href*="/engage/organization/"]')
+                        ))
+                        search_results = [
+                            org.get_attribute('href') 
+                            for org in orgs[:3]
+                        ]
+                        self.logger.info(f"@web_scrape.py Found {len(search_results)} ASU Campus Labs results")
+                        
+                    elif 'news' in search_url:
+                        # Wait for news items to load
+                        self.logger.info(f"@web_scrape.py Searching for ASU Campus Labs news links {search_url}")
+                        news = wait.until(EC.presence_of_all_elements_located(
+                            (By.CSS_SELECTOR, 'a[href*="/engage/news/"]')
+                        ))
+                        search_results = [
+                            article.get_attribute('href') 
+                            for article in news[:3]
+                        ]
+                        self.logger.info(f"@web_scrape.py Found {len(search_results)} ASU Campus Labs results")
+                        
                     
-                    
-                elif 'organizations' in search_url:
-                    # Wait for organizations to load
-                    self.logger.info(f"@web_scrape.py Searching for ASU Campus Labs organizations links {search_url}")
-                    orgs = wait.until(EC.presence_of_all_elements_located(
-                        (By.CSS_SELECTOR, 'a[href*="/engage/organization/"]')
-                    ))
-                    search_results = [
-                        org.get_attribute('href') 
-                        for org in orgs[:3]
-                    ]
-                    self.logger.info(f"@web_scrape.py Found {len(search_results)} ASU Campus Labs results")
-                    
-                elif 'news' in search_url:
-                    # Wait for news items to load
-                    self.logger.info(f"@web_scrape.py Searching for ASU Campus Labs news links {search_url}")
-                    news = wait.until(EC.presence_of_all_elements_located(
-                        (By.CSS_SELECTOR, 'a[href*="/engage/news/"]')
-                    ))
-                    search_results = [
-                        article.get_attribute('href') 
-                        for article in news[:3]
-                    ]
-                    self.logger.info(f"@web_scrape.py Found {len(search_results)} ASU Campus Labs results")
-                    
-                
-                for url in search_results:
-                    self.logger.info(f"@web_scrape.py Scraping content from {url}")
-                    await self.scrape_static_content(url=url)
+                    for url in search_results:
+                        self.logger.info(f"@web_scrape.py Scraping content from {url}")
+                        await self.scrape_static_content(url=url)
                                 
             if 'x.com' in search_url or 'facebook.com' in search_url or "instagram.com" in search_url:
                 if optional_query:
@@ -1756,6 +1769,220 @@ class ASUWebScraper:
         
         return search_results
     
+    async def scrape_sundevil_central(self, url, query) -> List[Dict[str, str]]:
+        """
+        Scrape content from ASU's new SunDevilCentral platform (sundevilcentral.asu.edu)
+        This replaces the legacy SunDevilSync (asu.campuslabs.com/engage) platform
+        """
+        try:
+            self.logger.info(" @web_scrape.py Initializing SunDevilCentral scraper")
+            self.driver.get(url)
+            
+            # Wait for page to load
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, 'body'))
+            )
+            
+            # Handle potential cookie consent
+            try:
+                cookie_accept = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="accept-cookies"], .accept-cookies, .cookie-accept'))
+                )
+                cookie_accept.click()
+                self.logger.info(" @web_scrape.py Cookie consent accepted")
+            except:
+                self.logger.info(" @web_scrape.py No cookie consent found or already accepted")
+            
+            results = []
+            
+            # Check if this is an organization search
+            if 'organization' in url or (query and 'organization_category' in str(query)):
+                results.extend(await self._scrape_central_organizations(query))
+            
+            # Check if this is an event search
+            elif 'event' in url or (query and 'event_category' in str(query)):
+                results.extend(await self._scrape_central_events(query))
+                
+            # General search
+            else:
+                results.extend(await self._scrape_central_general(query))
+            
+            self.logger.info(f" @web_scrape.py Scraped {len(results)} items from SunDevilCentral")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f" @web_scrape.py Error scraping SunDevilCentral: {str(e)}")
+            return []
+
+    async def _scrape_central_organizations(self, query) -> List[Dict[str, str]]:
+        """Scrape organizations from SunDevilCentral"""
+        try:
+            # Wait for organization cards or list items
+            org_elements = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, 
+                    '.organization-card, .org-item, [data-testid*="organization"], .card[href*="organization"]'
+                ))
+            )
+            
+            results = []
+            for element in org_elements[:10]:  # Limit to 10 organizations
+                try:
+                    # Extract organization information
+                    title_elem = element.find_element(By.CSS_SELECTOR, 'h1, h2, h3, .title, .name, .org-title') if element else None
+                    title = title_elem.text.strip() if title_elem else "Unknown Organization"
+                    
+                    # Try to get description
+                    desc_elem = element.find_element(By.CSS_SELECTOR, '.description, .summary, .about, p') if element else None
+                    description = desc_elem.text.strip() if desc_elem else "No description available"
+                    
+                    # Try to get contact info
+                    contact_elem = element.find_element(By.CSS_SELECTOR, '.contact, .email, .phone') if element else None
+                    contact = contact_elem.text.strip() if contact_elem else ""
+                    
+                    # Try to get category/tags
+                    category_elem = element.find_element(By.CSS_SELECTOR, '.category, .tag, .type') if element else None
+                    category = category_elem.text.strip() if category_elem else ""
+                    
+                    # Try to get link
+                    link_elem = element.find_element(By.CSS_SELECTOR, 'a[href]') if element else None
+                    org_link = link_elem.get_attribute('href') if link_elem else ""
+                    
+                    # Format content
+                    content = f"Organization: {title}\n"
+                    content += f"Description: {description}\n"
+                    if category:
+                        content += f"Category: {category}\n"
+                    if contact:
+                        content += f"Contact: {contact}\n"
+                    if org_link:
+                        content += f"Link: {org_link}\n"
+                    
+                    results.append({
+                        'content': content,
+                        'metadata': {
+                            'url': self.driver.current_url,
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'type': 'organization',
+                            'platform': 'SunDevilCentral'
+                        }
+                    })
+                    
+                except Exception as e:
+                    self.logger.warning(f"@web_scrape.py Error extracting organization info: {str(e)}")
+                    continue
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"@web_scrape.py Error scraping organizations: {str(e)}")
+            return []
+
+    async def _scrape_central_events(self, query) -> List[Dict[str, str]]:
+        """Scrape events from SunDevilCentral"""
+        try:
+            # Wait for event cards or list items
+            event_elements = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, 
+                    '.event-card, .event-item, [data-testid*="event"], .card[href*="event"], .event-listing'
+                ))
+            )
+            
+            results = []
+            for element in event_elements[:10]:  # Limit to 10 events
+                try:
+                    # Extract event information
+                    title_elem = element.find_element(By.CSS_SELECTOR, 'h1, h2, h3, .title, .event-title') if element else None
+                    title = title_elem.text.strip() if title_elem else "Unknown Event"
+                    
+                    # Try to get date/time
+                    date_elem = element.find_element(By.CSS_SELECTOR, '.date, .time, .datetime, .when') if element else None
+                    event_date = date_elem.text.strip() if date_elem else "Date TBD"
+                    
+                    # Try to get location
+                    location_elem = element.find_element(By.CSS_SELECTOR, '.location, .where, .venue') if element else None
+                    location = location_elem.text.strip() if location_elem else "Location TBD"
+                    
+                    # Try to get description
+                    desc_elem = element.find_element(By.CSS_SELECTOR, '.description, .summary, .about, p') if element else None
+                    description = desc_elem.text.strip() if desc_elem else "No description available"
+                    
+                    # Try to get organizer
+                    org_elem = element.find_element(By.CSS_SELECTOR, '.organizer, .host, .by') if element else None
+                    organizer = org_elem.text.strip() if org_elem else ""
+                    
+                    # Try to get registration link
+                    reg_elem = element.find_element(By.CSS_SELECTOR, 'a[href*="register"], a[href*="signup"], .register-btn') if element else None
+                    reg_link = reg_elem.get_attribute('href') if reg_elem else ""
+                    
+                    # Format content
+                    content = f"Event: {title}\n"
+                    content += f"Date/Time: {event_date}\n"
+                    content += f"Location: {location}\n"
+                    content += f"Description: {description}\n"
+                    if organizer:
+                        content += f"Organizer: {organizer}\n"
+                    if reg_link:
+                        content += f"Registration: {reg_link}\n"
+                    
+                    results.append({
+                        'content': content,
+                        'metadata': {
+                            'url': self.driver.current_url,
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'type': 'event',
+                            'platform': 'SunDevilCentral'
+                        }
+                    })
+                    
+                except Exception as e:
+                    self.logger.warning(f"@web_scrape.py Error extracting event info: {str(e)}")
+                    continue
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"@web_scrape.py Error scraping events: {str(e)}")
+            return []
+
+    async def _scrape_central_general(self, query) -> List[Dict[str, str]]:
+        """Scrape general content from SunDevilCentral"""
+        try:
+            # Wait for main content to load
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'main, .main-content, .content, body'))
+            )
+            
+            # Extract general page content
+            content_elements = self.driver.find_elements(By.CSS_SELECTOR, 
+                'main p, .content p, .description, .summary, .info, article'
+            )
+            
+            results = []
+            all_content = []
+            
+            for element in content_elements[:5]:  # Limit content extraction
+                text = element.text.strip()
+                if text and len(text) > 20:  # Only meaningful content
+                    all_content.append(text)
+            
+            if all_content:
+                combined_content = "\n\n".join(all_content)
+                results.append({
+                    'content': combined_content,
+                    'metadata': {
+                        'url': self.driver.current_url,
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'type': 'general',
+                        'platform': 'SunDevilCentral'
+                    }
+                })
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"@web_scrape.py Error scraping general content: {str(e)}")
+            return []
+
     async def scrape_sundevils_tickets(self, url, query) -> List[Dict[str,str]]:
         self.logger.info(" @web_scrape.py \nInitializing Ticketing Scraper")
         self.text_content = []

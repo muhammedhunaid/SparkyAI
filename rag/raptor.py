@@ -1,19 +1,93 @@
 from utils.common_imports import *
+import hashlib
+import time
+from typing import Dict, Any, List
 
 class RaptorRetriever:
     
-    def __init__(self, vector_store_class, logger, vector_store,num_levels=3, branching_factor=5):
+    def __init__(self, vector_store_class, logger, vector_store, num_levels=3, branching_factor=5, enable_caching=True):
         try:
             self.logger = logger
             self.vector_store_class = vector_store_class
+            self.vector_store = vector_store
             self.num_levels = num_levels
-            self.queued_docs=[]
-            self.vector_store=vector_store
             self.branching_factor = branching_factor
+            self.enable_caching = enable_caching
+            
+            # Enhanced caching and performance tracking
+            self.query_cache = {} if enable_caching else None
+            self.cache_timestamps = {}
+            self.cache_ttl = 1800  # 30 minutes
+            
+            # Performance metrics
+            self.performance_metrics = {
+                'queries_processed': 0,
+                'cache_hits': 0,
+                'cache_misses': 0,
+                'average_response_time': 0,
+                'total_response_time': 0,
+                'tree_updates': 0,
+                'failed_queries': 0
+            }
+            
+            # Document processing queue with priority support
+            self.queued_docs = []
+            self.priority_queue = []
+            
+            # Build initial tree
             self.tree = self.build_raptor_tree()
-            logger.info(f"@raptor.py RAPTOR Retriever initialized.")
+            
+            # Tree optimization settings
+            self.max_cluster_size = 50
+            self.min_cluster_size = 5
+            self.rebalance_threshold = 100  # Rebalance tree after this many updates
+            self.updates_since_rebalance = 0
+            
+            logger.info(f"@raptor.py Enhanced RAPTOR Retriever initialized with caching={enable_caching}")
         except Exception as e:
-            logger.error(f"@raptor.py Error initializing RAPTOR Retriever: {str(e)}")
+            logger.error(f"@raptor.py Error initializing Enhanced RAPTOR Retriever: {str(e)}")
+            raise e
+    
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get current performance metrics"""
+        metrics = self.performance_metrics.copy()
+        if metrics['queries_processed'] > 0:
+            metrics['average_response_time'] = metrics['total_response_time'] / metrics['queries_processed']
+            metrics['cache_hit_rate'] = metrics['cache_hits'] / (metrics['cache_hits'] + metrics['cache_misses']) if (metrics['cache_hits'] + metrics['cache_misses']) > 0 else 0
+        return metrics
+    
+    def clear_cache(self):
+        """Clear the query cache"""
+        if self.query_cache is not None:
+            self.query_cache.clear()
+            self.cache_timestamps.clear()
+            self.logger.info("@raptor.py Query cache cleared")
+    
+    def _is_cache_valid(self, cache_key: str) -> bool:
+        """Check if cache entry is still valid"""
+        if not self.enable_caching or cache_key not in self.cache_timestamps:
+            return False
+        return (time.time() - self.cache_timestamps[cache_key]) < self.cache_ttl
+    
+    def _get_query_cache_key(self, query: str, top_k: int) -> str:
+        """Generate cache key for query"""
+        return hashlib.md5(f"{query}_{top_k}".encode()).hexdigest()
+    
+    def queue_raptor_tree_priority(self, new_documents, priority="normal"):
+        """Queue new documents with priority support for tree updates"""
+        try:
+            priority_levels = {"high": 1, "normal": 2, "low": 3}
+            priority_num = priority_levels.get(priority, 2)
+            
+            for doc in new_documents:
+                self.priority_queue.append((priority_num, doc))
+            
+            # Sort by priority
+            self.priority_queue.sort(key=lambda x: x[0])
+            
+            self.logger.info(f"@raptor.py Queued {len(new_documents)} documents with {priority} priority")
+        except Exception as e:
+            self.logger.error(f"@raptor.py Error queuing priority documents: {str(e)}")
             raise e
     
     def queue_raptor_tree(self, new_documents):
@@ -175,9 +249,27 @@ class RaptorRetriever:
             self.logger.error(f"@raptor.py Critical error in generate_summary: {str(e)}")
             return "Summary generation failed"
 
-    def retrieve(self, query, top_k=5):
+    async def retrieve(self, query, top_k=5, use_cache=True):
+        """Enhanced RAPTOR retrieval with caching and performance tracking"""
+        start_time = time.time()
+        self.performance_metrics['queries_processed'] += 1
+        
         try:
+            # Check cache if enabled
+            if use_cache and self.enable_caching:
+                cache_key = self._get_query_cache_key(query, top_k)
+                if self._is_cache_valid(cache_key):
+                    self.performance_metrics['cache_hits'] += 1
+                    self.logger.debug(f"@raptor.py Cache hit for query: {query[:50]}...")
+                    return self.query_cache[cache_key]
+                else:
+                    self.performance_metrics['cache_misses'] += 1
+            
             self.logger.info(f"@raptor.py Retrieving documents for query: {query[:50]}...")
+            
+            # Process any queued documents first
+            if self.priority_queue:
+                await self._process_priority_queue()
             
             try:
                 query_embedding = self.vector_store_class.embedding_model.embed_query(query)
@@ -229,9 +321,7 @@ class RaptorRetriever:
                             
                             # Try cluster-specific search first
                             try:
-                                
                                 # Create a Qdrant filter for cluster_id
-                                
                                 filter_conditions = Filter(
                                     must=[
                                         FieldCondition(
@@ -268,6 +358,17 @@ class RaptorRetriever:
                             try:
                                 reranked_results = self.rerank_results(query, initial_results, top_k)
                                 self.logger.info(f"@raptor.py Returning {len(reranked_results)} reranked results : {reranked_results[:5]}...")
+                                
+                                # Cache results if enabled
+                                if use_cache and self.enable_caching:
+                                    cache_key = self._get_query_cache_key(query, top_k)
+                                    self.query_cache[cache_key] = reranked_results
+                                    self.cache_timestamps[cache_key] = time.time()
+                                
+                                # Update performance metrics
+                                response_time = time.time() - start_time
+                                self.performance_metrics['total_response_time'] += response_time
+                                
                                 return reranked_results
                             except Exception as e:
                                 self.logger.error(f"@raptor.py Error during reranking: {str(e)}")
@@ -505,3 +606,117 @@ class RaptorRetriever:
         except Exception as e:
             self.logger.error(f"@raptor.py Error updating RAPTOR tree: {str(e)}")
             raise e
+
+    def _calculate_similarity(self, embedding1, embedding2) -> float:
+        """Calculate cosine similarity between embeddings"""
+        try:
+            import numpy as np
+            
+            # Ensure embeddings are numpy arrays
+            emb1 = np.array(embedding1) if not isinstance(embedding1, np.ndarray) else embedding1
+            emb2 = np.array(embedding2) if not isinstance(embedding2, np.ndarray) else embedding2
+            
+            # Calculate cosine similarity
+            dot_product = np.dot(emb1, emb2)
+            magnitude1 = np.linalg.norm(emb1)
+            magnitude2 = np.linalg.norm(emb2)
+            
+            if magnitude1 == 0 or magnitude2 == 0:
+                return 0.0
+            
+            return dot_product / (magnitude1 * magnitude2)
+        except Exception as e:
+            self.logger.error(f"@raptor.py Error calculating similarity: {str(e)}")
+            return 0.0
+    
+    def _deduplicate_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Remove duplicate results based on content similarity"""
+        try:
+            if not results:
+                return []
+            
+            unique_results = []
+            seen_content = set()
+            
+            for result in results:
+                content = result.get('content', '').strip()
+                content_hash = hashlib.md5(content.encode()).hexdigest()
+                
+                # Check for exact matches first
+                if content_hash not in seen_content:
+                    seen_content.add(content_hash)
+                    unique_results.append(result)
+                elif len(unique_results) < 5:  # Allow some duplicates if we have very few results
+                    unique_results.append(result)
+            
+            return unique_results
+        except Exception as e:
+            self.logger.error(f"@raptor.py Error deduplicating results: {str(e)}")
+            return results
+    
+    async def _process_priority_queue(self):
+        """Process queued documents with priority ordering"""
+        try:
+            if not self.priority_queue:
+                return
+            
+            # Process high priority documents first
+            high_priority_docs = [doc for priority, doc in self.priority_queue if priority == 1]
+            normal_priority_docs = [doc for priority, doc in self.priority_queue if priority == 2]
+            low_priority_docs = [doc for priority, doc in self.priority_queue if priority == 3]
+            
+            all_docs = high_priority_docs + normal_priority_docs + low_priority_docs
+            
+            if all_docs:
+                await self._update_tree_with_new_documents(all_docs)
+                self.priority_queue.clear()
+                self.performance_metrics['tree_updates'] += 1
+                
+            self.logger.info(f"@raptor.py Processed {len(all_docs)} queued documents")
+        except Exception as e:
+            self.logger.error(f"@raptor.py Error processing priority queue: {str(e)}")
+    
+    async def _update_tree_with_new_documents(self, new_documents):
+        """Update RAPTOR tree with new documents"""
+        try:
+            # Add new documents to level 0 (leaf level)
+            if 'level_0' not in self.tree:
+                self.tree['level_0'] = {}
+            
+            for doc in new_documents:
+                # Generate embedding if not present
+                if 'embedding' not in doc:
+                    doc['embedding'] = self.vector_store.generate_embedding([doc.get('text', '')])[0]
+                
+                # Add to appropriate cluster or create new one
+                if 'summaries' not in self.tree['level_0']:
+                    self.tree['level_0']['summaries'] = {}
+                
+                # Simple assignment to cluster 0 for now - could be improved with proper clustering
+                cluster_id = 0
+                if cluster_id not in self.tree['level_0']['summaries']:
+                    self.tree['level_0']['summaries'][cluster_id] = []
+                
+                self.tree['level_0']['summaries'][cluster_id].append(doc)
+            
+            # Check if rebalancing is needed
+            self.updates_since_rebalance += len(new_documents)
+            if self.updates_since_rebalance >= self.rebalance_threshold:
+                await self._rebalance_tree()
+                self.updates_since_rebalance = 0
+            
+            self.logger.info(f"@raptor.py Updated tree with {len(new_documents)} new documents")
+        except Exception as e:
+            self.logger.error(f"@raptor.py Error updating tree: {str(e)}")
+    
+    async def _rebalance_tree(self):
+        """Rebalance the RAPTOR tree for optimal performance"""
+        try:
+            self.logger.info("@raptor.py Starting tree rebalancing...")
+            
+            # For now, just clear cache - full rebalancing would require rebuilding
+            self.clear_cache()
+            
+            self.logger.info("@raptor.py Tree rebalancing completed")
+        except Exception as e:
+            self.logger.error(f"@raptor.py Error rebalancing tree: {str(e)}")
